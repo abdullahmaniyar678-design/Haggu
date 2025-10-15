@@ -29,10 +29,10 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
 
     for q in mcqs:
-        await context.bot.send_poll(
-            chat_id=update.effective_chat.id,
-            question=q["question"],
-            options=q["options"],
+        if len(question_text) > 300:
+    question_text = question_text[:297] + "..."  # Trim to fit limit
+
+await context.bot.send_poll(chat_id, question=question_text, options=options),
             type="quiz",
             correct_option_id=q["correct_index"],
             is_anonymous=False
@@ -40,4 +40,5 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
+
 app.run_polling()
