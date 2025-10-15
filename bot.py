@@ -79,7 +79,7 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_safe_poll(
             context,
             chat_id,
-            question_text=q["question_text"],
+            question_text=q["question"],
             options=q["options"],
             correct_option=q["correct_index"]
         )
@@ -88,6 +88,7 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+
 
 
 
