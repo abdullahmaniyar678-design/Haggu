@@ -65,6 +65,7 @@ def extract_mcqs_from_pdf(pdf_path):
     return mcqs
 
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
     msg = await update.message.reply_text("📥 Downloading your PDF, please wait...")
     file = await context.bot.get_file(update.message.document.file_id)
     tmp = tempfile.mktemp(suffix=".pdf")
@@ -87,6 +88,7 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+
 
 
 
