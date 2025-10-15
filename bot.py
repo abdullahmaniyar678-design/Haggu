@@ -1,3 +1,49 @@
+import asyncio
+from telegram.error import RetryAfter, BadRequest
+
+# ---------- SAFE POLL FUNCTION ----------
+async def send_safe_poll(context, chat_id, question_text, options, correct_option=None):
+    """
+    Safely sends a Telegram poll with:
+      - Auto trimming long questions
+      - Auto retrying after rate limits
+      - Delay between polls
+    """
+
+    # 1️⃣ Trim questions if longer than 300 characters
+    if len(question_text) > 300:
+        print(f"⚠️ Question too long ({len(question_text)} chars). Trimming...")
+        question_text = question_text[:297] + "..."
+
+    try:
+        await context.bot.send_poll(
+            chat_id=chat_id,
+            question=question_text,
+            options=options,
+            is_anonymous=False,
+            type='quiz',
+            correct_option_id=correct_option,
+        )
+
+        # Wait a bit to respect Telegram’s rate limit (30 msgs/sec)
+        await asyncio.sleep(0.3)
+
+    except RetryAfter as e:
+        print(f"⏳ Flood control: waiting {e.retry_after} seconds...")
+        await asyncio.sleep(e.retry_after)
+        await send_safe_poll(context, chat_id, question_text, options, correct_option)
+
+    except BadRequest as e:
+        print(f"❌ BadRequest: {e}")
+        if "must not exceed 300" in str(e):
+            question_text = question_text[:297] + "..."
+            await send_safe_poll(context, chat_id, question_text, options, correct_option)
+        else:
+            print("⚠️ Skipped problematic question.")
+
+    except Exception as e:
+        print(f"⚠️ Unexpected error while sending poll: {e}")
+# ---------- END OF SAFE POLL FUNCTION ----------
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, filters, ContextTypes
 import fitz, re, os, tempfile
@@ -29,16 +75,16 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
 
     for q in mcqs:
-        if len(question_text) > 300:
-    question_text = question_text[:297] + "..."  # Trim to fit limit
-
-await context.bot.send_poll(chat_id, question=question_text, options=options),
-            type="quiz",
-            correct_option_id=q["correct_index"],
-            is_anonymous=False
-        )
+    await send_safe_poll(
+        context,
+        chat_id,
+        question_text=q["question_text"],
+        options=q["options"],
+        correct_option=q["correct_index"]
+    )
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+
