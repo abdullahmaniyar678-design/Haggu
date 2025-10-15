@@ -73,7 +73,8 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mcqs = extract_mcqs_from_pdf(tmp)
     os.remove(tmp)
     await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
-
+    
+    chat_id = update.effective_chat.id
     for q in mcqs:
         await send_safe_poll(
             context,
@@ -87,5 +88,6 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+
 
 
