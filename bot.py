@@ -1,7 +1,6 @@
 import asyncio
 from telegram.error import RetryAfter, BadRequest
 
-# ---------- SAFE POLL FUNCTION ----------
 async def send_safe_poll(context, chat_id, question_text, options, correct_option=None):
     """
     Safely sends a Telegram poll with:
@@ -147,6 +146,7 @@ threading.Thread(target=lambda: HTTPServer(("", PORT), Handler).serve_forever(),
 
 # Now your telegram bot main loop
 bot.infinity_polling()
+
 
 
 
