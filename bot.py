@@ -130,6 +130,24 @@ app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+import os
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+PORT = int(os.environ.get("PORT", 10000))
+
+class Handler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"Bot is running")
+        
+# Start a background server
+import threading
+threading.Thread(target=lambda: HTTPServer(("", PORT), Handler).serve_forever(), daemon=True).start()
+
+# Now your telegram bot main loop
+bot.infinity_polling()
+
 
 
 
