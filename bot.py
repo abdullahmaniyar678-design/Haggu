@@ -2,7 +2,7 @@ import asyncio
 import os
 import re
 import tempfile
-import fitz
+import fitz  # PyMuPDF
 from telegram import Update
 from telegram.error import RetryAfter, BadRequest
 from telegram.ext import (
@@ -14,20 +14,18 @@ from telegram.ext import (
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import threading
 
+# ===========================
+#   BOT TOKEN
+# ===========================
+BOT_TOKEN = "8229155473:AAF2MIDyGBWuIvzvw_B2G3mmIrbIrPDTLm0"  # <--- Add your real bot token here
+
 
 # ===========================
-#   TELEGRAM BOT TOKEN
-# ===========================
-BOT_TOKEN = "8229155473:AAF2MIDyGBWuIvzvw_B2G3mmIrbIrPDTLm0"   # <--- put your real token inside quotes
-
-
-# ===========================
-#   SAFE POLL SENDER
+#   SAFE POLL FUNCTION
 # ===========================
 async def send_safe_poll(context, chat_id, question_text, options, correct_option=None):
-    """Safely send quiz polls with retries and rate-limit handling."""
+    """Safely send Telegram quiz polls with retries and rate-limit handling."""
     if len(question_text) > 300:
-        print(f"⚠️ Question too long ({len(question_text)} chars). Trimming...")
         question_text = question_text[:297] + "..."
 
     try:
@@ -47,7 +45,7 @@ async def send_safe_poll(context, chat_id, question_text, options, correct_optio
         await send_safe_poll(context, chat_id, question_text, options, correct_option)
 
     except BadRequest as e:
-        print(f"❌ BadRequest: {e}")
+        print(f"⚠️ BadRequest: {e}")
         if "must not exceed 300" in str(e):
             question_text = question_text[:297] + "..."
             await send_safe_poll(context, chat_id, question_text, options, correct_option)
@@ -55,44 +53,58 @@ async def send_safe_poll(context, chat_id, question_text, options, correct_optio
             print("⚠️ Skipped problematic question.")
 
     except Exception as e:
-        print(f"⚠️ Unexpected error while sending poll: {e}")
+        print(f"⚠️ Unexpected error: {e}")
 
 
 # ===========================
-#   PDF → MCQ EXTRACTOR
+#   EXTRACT MCQS FROM PDF
 # ===========================
 def extract_mcqs_from_pdf(pdf_path):
     doc = fitz.open(pdf_path)
     text = "\n".join([p.get_text("text") for p in doc])
-    pattern = r"(\d+\..*?)(A\..*?)(B\..*?)(C\..*?)(D\..*?)(Ans[:\- ]?.*?)\n"
+
+    # Flexible pattern for questions, options (A–D), and answer letter
+    pattern = (
+        r"(\d+\..*?)"                # Question (starts with number)
+        r"(?:A\.\s*(.*?))"           # Option A
+        r"(?:B\.\s*(.*?))"           # Option B
+        r"(?:C\.\s*(.*?))"           # Option C
+        r"(?:D\.\s*(.*?))"           # Option D
+        r"(?:Ans[:\- ]*\s*([A-Da-d]))"  # Answer letter
+    )
+
     matches = re.findall(pattern, text, re.DOTALL)
     mcqs = []
+
     for q in matches:
         question = q[0].strip()
-        options = [q[1][2:].strip(), q[2][2:].strip(), q[3][2:].strip(), q[4][2:].strip()]
-        answer = q[5].replace("Ans:", "").strip().upper()
-        correct_index = "ABCD".index(answer[0]) if answer and answer[0] in "ABCD" else 0
-        mcqs.append(
-            {
-                "question": question,
-                "options": options,
-                "correct_index": correct_index,
-            }
-        )
+        options = [opt.strip() for opt in q[1:5]]
+        answer_letter = q[5].strip().upper() if len(q) > 5 else "A"
+        correct_index = "ABCD".index(answer_letter) if answer_letter in "ABCD" else 0
+
+        mcqs.append({
+            "question": question,
+            "options": options,
+            "correct_index": correct_index,
+        })
+
+    print(f"✅ Extracted {len(mcqs)} MCQs")
     return mcqs
 
 
 # ===========================
-#   MAIN HANDLER
+#   PDF HANDLER FUNCTION
 # ===========================
 async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     msg = await update.message.reply_text("📥 Downloading your PDF, please wait...")
 
+    # Download PDF file temporarily
     file = await context.bot.get_file(update.message.document.file_id)
     tmp = tempfile.mktemp(suffix=".pdf")
     await file.download_to_drive(tmp)
 
+    # Extract MCQs
     mcqs = extract_mcqs_from_pdf(tmp)
     os.remove(tmp)
 
@@ -100,24 +112,17 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     last_topic = None
 
     for q in mcqs:
-        # 1️⃣ Topic
+        # 1️⃣ Optional topic line (you can show every time)
         current_topic = q.get("topic", "General")
-        if current_topic != last_topic:
+        if True:  # Always show topic
             await context.bot.send_message(
                 chat_id,
                 f"📘 *Topic:* {current_topic}",
                 parse_mode="Markdown",
             )
-            last_topic = current_topic
-            await asyncio.sleep(0.3)
+            await asyncio.sleep(0.2)
 
-        # 2️⃣ Question images (if any)
-        if "question_images" in q and q["question_images"]:
-            for img in q["question_images"]:
-                await context.bot.send_photo(chat_id, img)
-                await asyncio.sleep(0.3)
-
-        # 3️⃣ Poll question
+        # 2️⃣ Send quiz poll
         await send_safe_poll(
             context,
             chat_id,
@@ -126,27 +131,9 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
             correct_option=q["correct_index"],
         )
 
-        # 4️⃣ Explanation text
-        if "explanation" in q and q["explanation"]:
-            await asyncio.sleep(1)
-            text = q["explanation"]
-            special_chars = [
-                "_", "*", "[", "]", "(", ")", "~", "`", ">", "#",
-                "+", "-", "=", "|", "{", "}", ".", "!"
-            ]
-            for ch in special_chars:
-                text = text.replace(ch, f"\\{ch}")
-            await context.bot.send_message(
-                chat_id,
-                f"💡 *Explanation:* ||{text}||",
-                parse_mode="MarkdownV2",
-            )
+        await asyncio.sleep(0.3)
 
-        # 5️⃣ Explanation images (if any)
-        if "explanation_images" in q and q["explanation_images"]:
-            for img in q["explanation_images"]:
-                await context.bot.send_photo(chat_id, img)
-                await asyncio.sleep(0.3)
+    await context.bot.send_message(chat_id, "✅ All questions sent successfully!")
 
 
 # ===========================
@@ -154,14 +141,12 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===========================
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
-app.run_polling()
 
 
 # ===========================
-#   KEEP-ALIVE HTTP SERVER
+#   KEEP-ALIVE HTTP SERVER (for Render)
 # ===========================
 PORT = int(os.environ.get("PORT", 10000))
-
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
@@ -169,20 +154,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is running")
 
-
+# Run small HTTP server in background (Render keep-alive)
 threading.Thread(
     target=lambda: HTTPServer(("", PORT), Handler).serve_forever(),
     daemon=True,
 ).start()
-import os
-from threading import Thread
-from http.server import SimpleHTTPRequestHandler
-from socketserver import TCPServer
 
-def keep_alive():
-    port = int(os.environ.get("PORT", 10000))
-    handler = SimpleHTTPRequestHandler
-    with TCPServer(("", port), handler) as httpd:
-        httpd.serve_forever()
-
-Thread(target=keep_alive).start()
+# Run the Telegram bot polling
+app.run_polling()
