@@ -60,25 +60,26 @@ async def send_safe_poll(context, chat_id, question_text, options, correct_optio
 #   EXTRACT MCQS FROM PDF
 # ===========================
 def extract_mcqs_from_pdf(pdf_path):
+    """Extracts MCQs (question, 4 options, and answer) from a PDF."""
     doc = fitz.open(pdf_path)
     text = "\n".join([p.get_text("text") for p in doc])
 
-    # Flexible pattern for questions, options (A–D), and answer letter
+    # Flexible pattern for question, 4 options (A–D), and answer letter
     pattern = (
-        r"(\d+\..*?)"                # Question (starts with number)
-        r"(?:A\.\s*(.*?))"           # Option A
-        r"(?:B\.\s*(.*?))"           # Option B
-        r"(?:C\.\s*(.*?))"           # Option C
-        r"(?:D\.\s*(.*?))"           # Option D
-        r"(?:Ans[:\- ]*\s*([A-Da-d]))"  # Answer letter
+        r"(\d+\..*?)"                     # Question starts with number
+        r"(?:A[\.\)]\s*(.*?))"            # Option A
+        r"(?:B[\.\)]\s*(.*?))"            # Option B
+        r"(?:C[\.\)]\s*(.*?))"            # Option C
+        r"(?:D[\.\)]\s*(.*?))"            # Option D
+        r"(?:Ans(?:wer)?[:\-\s]*([A-Da-d]))"  # Answer line
     )
 
     matches = re.findall(pattern, text, re.DOTALL)
     mcqs = []
 
     for q in matches:
-        question = q[0].strip()
-        options = [opt.strip() for opt in q[1:5]]
+        question = q[0].strip().replace("\n", " ")
+        options = [opt.strip().replace("\n", " ") for opt in q[1:5]]
         answer_letter = q[5].strip().upper() if len(q) > 5 else "A"
         correct_index = "ABCD".index(answer_letter) if answer_letter in "ABCD" else 0
 
@@ -99,41 +100,51 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     msg = await update.message.reply_text("📥 Downloading your PDF, please wait...")
 
-    # Download PDF file temporarily
-    file = await context.bot.get_file(update.message.document.file_id)
-    tmp = tempfile.mktemp(suffix=".pdf")
-    await file.download_to_drive(tmp)
+    try:
+        # Download the PDF file temporarily
+        file = await context.bot.get_file(update.message.document.file_id)
+        tmp = tempfile.mktemp(suffix=".pdf")
+        await file.download_to_drive(tmp)
 
-    # Extract MCQs
-    mcqs = extract_mcqs_from_pdf(tmp)
-    os.remove(tmp)
+        print(f"📄 Downloaded PDF at: {tmp}")
 
-    await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
-    last_topic = None
+        # Extract MCQs from PDF
+        mcqs = extract_mcqs_from_pdf(tmp)
+        os.remove(tmp)
 
-    for q in mcqs:
-        # 1️⃣ Optional topic line (you can show every time)
-        current_topic = q.get("topic", "General")
-        if True:  # Always show topic
+        # Handle case: no MCQs found
+        if not mcqs:
+            await msg.edit_text("⚠️ No MCQs found in this PDF. Please check formatting or upload another file.")
+            print("⚠️ No MCQs extracted — possibly format mismatch.")
+            return
+
+        await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
+        last_topic = None
+
+        # Send each MCQ as a quiz poll
+        for q in mcqs:
+            current_topic = q.get("topic", "General")
             await context.bot.send_message(
                 chat_id,
                 f"📘 *Topic:* {current_topic}",
                 parse_mode="Markdown",
             )
-            await asyncio.sleep(0.2)
 
-        # 2️⃣ Send quiz poll
-        await send_safe_poll(
-            context,
-            chat_id,
-            question_text=q["question"],
-            options=q["options"],
-            correct_option=q["correct_index"],
-        )
+            await send_safe_poll(
+                context,
+                chat_id,
+                question_text=q["question"],
+                options=q["options"],
+                correct_option=q["correct_index"],
+            )
 
-        await asyncio.sleep(0.3)
+            await asyncio.sleep(0.4)
 
-    await context.bot.send_message(chat_id, "✅ All questions sent successfully!")
+        await context.bot.send_message(chat_id, "✅ All questions sent successfully!")
+
+    except Exception as e:
+        print(f"❌ Error in handle_pdf: {e}")
+        await msg.edit_text(f"⚠️ An error occurred: {e}")
 
 
 # ===========================
@@ -144,7 +155,7 @@ app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 
 # ===========================
-#   KEEP-ALIVE HTTP SERVER (for Render)
+#   KEEP-ALIVE SERVER FOR RENDER
 # ===========================
 PORT = int(os.environ.get("PORT", 10000))
 
@@ -154,11 +165,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(b"Bot is running")
 
-# Run small HTTP server in background (Render keep-alive)
+# Background keep-alive thread
 threading.Thread(
     target=lambda: HTTPServer(("", PORT), Handler).serve_forever(),
     daemon=True,
 ).start()
 
-# Run the Telegram bot polling
+# Run bot polling
 app.run_polling()
