@@ -75,19 +75,62 @@ async def handle_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE):
     os.remove(tmp)
     await msg.edit_text(f"✅ Extracted {len(mcqs)} questions! Sending polls...")
     chat_id = update.effective_chat.id
-    for q in mcqs:
-        await send_safe_poll(
-            context,
+    last_topic = None  # to remember last topic name
+
+for q in mcqs:
+    # 1️⃣ Show topic name once
+    current_topic = q.get("topic", "General")  # default "General" if no topic
+    if current_topic != last_topic:
+        await context.bot.send_message(
             chat_id,
-            question_text=q["question"],
-            options=q["options"],
-            correct_option=q["correct_index"]
+            f"📘 *Topic:* {current_topic}",
+            parse_mode="Markdown"
         )
+        last_topic = current_topic  # remember topic
+        await asyncio.sleep(0.3)
+
+    # 2️⃣ Send question image(s) (if any)
+    if "question_images" in q and q["question_images"]:
+        for img in q["question_images"]:
+            await context.bot.send_photo(chat_id, img)
+            await asyncio.sleep(0.3)
+
+    # 3️⃣ Send the question as a poll
+    await send_safe_poll(
+        context,
+        chat_id,
+        question_text=q["question"],
+        options=q["options"],
+        correct_option=q["correct_index"]
+    )
+
+    # 4️⃣ Send hidden (grey) explanation
+    if "explanation" in q and q["explanation"]:
+        await asyncio.sleep(1)
+        text = q["explanation"]
+
+        # Escape special characters so Markdown doesn't break
+        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+        for ch in special_chars:
+            text = text.replace(ch, f"\\{ch}")
+
+        await context.bot.send_message(
+            chat_id,
+            f"💡 *Explanation:* ||{text}||",
+            parse_mode="MarkdownV2"
+        )
+
+    # 5️⃣ Send explanation images (if any)
+    if "explanation_images" in q and q["explanation_images"]:
+        for img in q["explanation_images"]:
+            await context.bot.send_photo(chat_id, img)
+            await asyncio.sleep(0.3)
 
 app = ApplicationBuilder().token(BOT_TOKEN).build()
 app.add_handler(MessageHandler(filters.Document.PDF, handle_pdf))
 
 app.run_polling()
+
 
 
 
