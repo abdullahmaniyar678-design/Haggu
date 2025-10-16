@@ -174,3 +174,15 @@ threading.Thread(
     target=lambda: HTTPServer(("", PORT), Handler).serve_forever(),
     daemon=True,
 ).start()
+import os
+from threading import Thread
+from http.server import SimpleHTTPRequestHandler
+from socketserver import TCPServer
+
+def keep_alive():
+    port = int(os.environ.get("PORT", 10000))
+    handler = SimpleHTTPRequestHandler
+    with TCPServer(("", port), handler) as httpd:
+        httpd.serve_forever()
+
+Thread(target=keep_alive).start()
